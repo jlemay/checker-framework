@@ -2,21 +2,15 @@ package org.checkerframework.checker.signedness;
 
 import com.sun.source.tree.BinaryTree;
 import com.sun.source.tree.CompoundAssignmentTree;
-import com.sun.source.tree.IdentifierTree;
 import com.sun.source.tree.Tree;
 import java.lang.annotation.Annotation;
 import java.util.Set;
 import javax.lang.model.element.AnnotationMirror;
-import javax.lang.model.type.TypeKind;
-import javax.lang.model.type.TypeMirror;
-import org.checkerframework.checker.index.IndexUtil;
-import org.checkerframework.checker.signedness.qual.Constant;
 import org.checkerframework.checker.signedness.qual.UnknownSignedness;
 import org.checkerframework.common.basetype.BaseAnnotatedTypeFactory;
 import org.checkerframework.common.basetype.BaseTypeChecker;
 import org.checkerframework.common.value.ValueAnnotatedTypeFactory;
 import org.checkerframework.common.value.ValueChecker;
-import org.checkerframework.common.value.util.Range;
 import org.checkerframework.framework.qual.TypeUseLocation;
 import org.checkerframework.framework.type.AnnotatedTypeFactory;
 import org.checkerframework.framework.type.AnnotatedTypeMirror;
@@ -30,7 +24,8 @@ import org.checkerframework.javacutil.AnnotationBuilder;
 public class SignednessAnnotatedTypeFactory extends BaseAnnotatedTypeFactory {
 
     private final AnnotationMirror UNKNOWN_SIGNEDNESS;
-    private final AnnotationMirror CONSTANT;
+    private final AnnotationMirror LITERAL;
+    private final AnnotationMirror CONSTANT_POSITIVE;
 
     private ValueAnnotatedTypeFactory valueAtypefactory;
 
@@ -57,7 +52,8 @@ public class SignednessAnnotatedTypeFactory extends BaseAnnotatedTypeFactory {
     public SignednessAnnotatedTypeFactory(BaseTypeChecker checker) {
         super(checker);
         UNKNOWN_SIGNEDNESS = AnnotationBuilder.fromClass(elements, UnknownSignedness.class);
-        CONSTANT = AnnotationBuilder.fromClass(elements, Constant.class);
+        LITERAL = AnnotationBuilder.fromClass(elements, Literal.class);
+        CONSTANT_POSITIVE = AnnotationBuilder.fromClass(elements, ConstantPositive.class);
 
         postInit();
     }
@@ -80,15 +76,15 @@ public class SignednessAnnotatedTypeFactory extends BaseAnnotatedTypeFactory {
         // it is the only refinable location (other than fields) that could
         // have a primitive type.
 
-        addUnknownSignednessToSomeLocals(tree, type);
+        addUnknownSignednessToIntegralLocals(tree, type);
         super.addComputedTypeAnnotations(tree, type, iUseFlow);
     }
 
     /**
-     * If the tree is a local variable and the type is a byte, short, int or long, then it adds the
-     * UnknownSignedness annotation so that data flow can refine it.
+     * If the tree is a local variable and the type is a byte, short, int or long, then adds the
+     * UnknownSignedness annotation so that dataflow can refine it.
      */
-    private void addUnknownSignednessToSomeLocals(Tree tree, AnnotatedTypeMirror type) {
+    private void addUnknownSignednessToIntegralLocals(Tree tree, AnnotatedTypeMirror type) {
         switch (type.getKind()) {
             case BYTE:
             case SHORT:
@@ -105,8 +101,8 @@ public class SignednessAnnotatedTypeFactory extends BaseAnnotatedTypeFactory {
                 // Nothing for other cases.
         }
 
-        // This code commented out until issues with making boxed implicitly signed
-        // are worked out. (https://github.com/typetools/checker-framework/issues/797)
+        // This code is commented out until boxed primitives can be made implicitly signed.
+        // (https://github.com/typetools/checker-framework/issues/797)
 
         /*switch (TypesUtils.getQualifiedName(type.getUnderlyingType()).toString()) {
         case JAVA_LANG_BYTE:
@@ -141,7 +137,7 @@ public class SignednessAnnotatedTypeFactory extends BaseAnnotatedTypeFactory {
         }
 
         /**
-         * Change the type of booleans to @UnknownSignedness so that the {@link
+         * Change the type of booleans to {@code @UnknownSignedness} so that the {@link
          * PropagationTreeAnnotator} does not change the type of them.
          */
         private void annotateBoolean(AnnotatedTypeMirror type) {
@@ -155,73 +151,85 @@ public class SignednessAnnotatedTypeFactory extends BaseAnnotatedTypeFactory {
         }
 
         @Override
+        /**
+         * Implements two behaviors: The type of a shift is the type of its LHS, and determining the
+         * type of an operation one of whose arguments is @Literal or @ConstantPositive
+         */
         public Void visitBinary(BinaryTree tree, AnnotatedTypeMirror type) {
-            switch (tree.getKind()) {
-                case LEFT_SHIFT:
-                case RIGHT_SHIFT:
-                case UNSIGNED_RIGHT_SHIFT:
-                    AnnotatedTypeMirror lht = getAnnotatedType(tree.getLeftOperand());
-                    type.replaceAnnotations(lht.getAnnotations());
-                    break;
-                default:
-                    // Do nothing
+
+            Tree lhs = tree.getLeftOperand();
+            Tree rhs = tree.getLeftOperand();
+            AnnotatedTypeMirror lht = getAnnotatedType(lhs);
+            AnnotatedTypeMirror rht = getAnnotatedType(rhs);
+
+            if (isLiteralOrConstantPositive(lht) && isLiteralOrConstantPositive(rht)) {
+                // Special rules for {@Literal, @Constant} op {@Literal, @Constant}
+
+                switch (tree.getKind()) {
+                    case LEFT_SHIFT: // left shift <<
+                    case RIGHT_SHIFT: // right shift >>
+                    case UNSIGNED_RIGHT_SHIFT: // unsigned right shift >>>
+                        // The type of a shift is the type of its LHS.
+                        AnnotatedTypeMirror lht = getAnnotatedType(tree.getLeftOperand());
+                        type.replaceAnnotations(lht.getAnnotations());
+                        break;
+
+                    case AND: // bitwise and logical "and" &
+                    case OR: // bitwise and logical "or" |
+                        // No special
+
+                    case CONDITIONAL_AND: // conditional-and &&
+                    case CONDITIONAL_OR: // conditional-or ||
+                    case DIVIDE: // division /
+                    case EQUAL_TO: // equal-to ==
+                    case GREATER_THAN: // greater-than >
+                    case GREATER_THAN_EQUAL: // greater-than-equal >=
+                    case LESS_THAN: // less-than <
+                    case LESS_THAN_EQUAL: // less-than-equal <=
+                    case MINUS: // subtraction -
+                    case MULTIPLY: // multiplication *
+                    case NOT_EQUAL_TO: // not-equal-to !=
+                    case PLUS: // addition or string concatenation +
+                    case REMAINDER: // remainder %
+                    case XOR: // bitwise and logical "xor" ^
+
+                    default:
+                        // Do nothing
+                }
+                annotateBoolean(type);
+                return null;
+            } else {
+                // The type of a shift is the type of its LHS.
+                switch (tree.getKind()) {
+                    case LEFT_SHIFT: // left shift <<
+                    case RIGHT_SHIFT: // right shift >>
+                    case UNSIGNED_RIGHT_SHIFT: // unsigned right shift >>>
+                        // The type of a shift is the type of its LHS.
+                        AnnotatedTypeMirror lht = getAnnotatedType(tree.getLeftOperand());
+                        type.replaceAnnotations(lht.getAnnotations());
+                        break;
+
+                    default:
+                        // Do nothing
+                }
+                annotateBoolean(type);
+                return null;
             }
-            annotateBoolean(type);
-            return null;
+        }
+
+        /**
+         * Returns true if the type is @Literal or @ConstantPositive.
+         *
+         * @param atm the type to test
+         * @return true if the type is @Literal or @ConstantPositive
+         */
+        boolean isLiteralOrConstantPositive(AnnotatedTypeMirror atm) {
+            throw new Error("not yet implemented");
         }
 
         @Override
         public Void visitCompoundAssignment(CompoundAssignmentTree tree, AnnotatedTypeMirror type) {
             annotateBoolean(type);
-            return null;
-        }
-
-        // Refines the type of an integer primitive to @Constant if it is within the signed positive
-        // range (i.e. its MSB is zero). Note that boxed primitives are not handled because they are
-        // not yet handled by the Signedness Checker (Issue #797).
-        @Override
-        public Void visitIdentifier(IdentifierTree tree, AnnotatedTypeMirror type) {
-            TypeMirror javaType = type.getUnderlyingType();
-            TypeKind javaTypeKind = javaType.getKind();
-
-            if (javaTypeKind == TypeKind.BYTE
-                    || javaTypeKind == TypeKind.CHAR
-                    || javaTypeKind == TypeKind.SHORT
-                    || javaTypeKind == TypeKind.INT
-                    || javaTypeKind == TypeKind.LONG) {
-                ValueAnnotatedTypeFactory valFact = getValueAnnotatedTypeFactory();
-                Range treeRange =
-                        IndexUtil.getPossibleValues(valFact.getAnnotatedType(tree), valFact);
-
-                if (treeRange != null) {
-                    switch (javaType.getKind()) {
-                        case BYTE:
-                        case CHAR:
-                            if (treeRange.isWithin(0, Byte.MAX_VALUE)) {
-                                type.replaceAnnotation(CONSTANT);
-                            }
-                            break;
-                        case SHORT:
-                            if (treeRange.isWithin(0, Short.MAX_VALUE)) {
-                                type.replaceAnnotation(CONSTANT);
-                            }
-                            break;
-                        case INT:
-                            if (treeRange.isWithin(0, Integer.MAX_VALUE)) {
-                                type.replaceAnnotation(CONSTANT);
-                            }
-                            break;
-                        case LONG:
-                            if (treeRange.isWithin(0, Long.MAX_VALUE)) {
-                                type.replaceAnnotation(CONSTANT);
-                            }
-                            break;
-                        default:
-                            // Nothing
-                    }
-                }
-            }
-
             return null;
         }
     }

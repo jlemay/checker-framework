@@ -10,7 +10,8 @@ import org.checkerframework.framework.qual.LiteralKind;
 import org.checkerframework.framework.qual.SubtypeOf;
 
 /**
- * The value is a compile-time constant, and could be {@link Signed} or {@link Unsigned}.
+ * The value is a manifest literal. The user may interpret it as {@link Signed} or {@link Unsigned}
+ * (the two interpretations may differ).
  *
  * @checker_framework.manual #signedness-checker Signedness Checker
  */
@@ -19,4 +20,4 @@ import org.checkerframework.framework.qual.SubtypeOf;
 @Target({ElementType.TYPE_USE, ElementType.TYPE_PARAMETER})
 @SubtypeOf({Unsigned.class, Signed.class})
 @ImplicitFor(literals = {LiteralKind.INT, LiteralKind.LONG, LiteralKind.CHAR})
-public @interface Constant {}
+public @interface Literal {}
