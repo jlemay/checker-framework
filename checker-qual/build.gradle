@@ -24,6 +24,12 @@ task copySources(type: Copy) {
     into file('src/main/java')
 }
 
+apply plugin: 'biz.aQute.bnd.builder'
+
+jar {
+    dependsOn copySources
+}
+
 compileJava {
     dependsOn copySources
 }

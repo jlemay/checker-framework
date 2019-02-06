@@ -313,6 +313,17 @@ subprojects {
         errorprone group: 'com.google.errorprone', name: 'error_prone_core', version: '2.3.2'
     }
 
+    buildscript {
+        repositories {
+            maven {
+                url "https://plugins.gradle.org/m2/"
+            }
+        }
+        dependencies {
+            classpath "biz.aQute.bnd:biz.aQute.bnd.gradle:4.1.0"
+        }
+    }
+
     task checkFormat(type: Exec, dependsOn: [getCodeFormatScripts, pythonIsInstalled], group: 'Format') {
         description 'Check whether the source code is properly formatted'
         // jdk8 and checker-qual have no source, so skip
